@@ -13,7 +13,7 @@
 
   <div class="card">
     <h3>My Jobs</h3>
-    <p>Manage your job listings and review performance.</p>
+    <p>{{ job_count }} listing{{ job_count|pluralize }} · {{ application_count }} application{{ application_count|pluralize }}</p>
     <a href="{% url 'jobs:employer_jobs' %}" class="btn btn-outline">View My Jobs</a>
   </div>
 

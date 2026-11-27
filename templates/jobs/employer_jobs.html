@@ -13,7 +13,7 @@
         <div class="job-card-header">
           <span class="job-title">{{ j.title }}</span>
           <span class="job-meta">
-            {{ j.company_name|default:user.company|default:user.username }}
+            {{ j.display_company }}
           </span>
         </div>
 
@@ -27,7 +27,8 @@
 
         <div class="job-tags">
           Deadline: {{ j.deadline }} &bull;
-          Skills: {{ j.skills|default:"Not specified" }}
+          Skills: {{ j.skills|default:"Not specified" }} &bull;
+          {{ j.application_count }} application{{ j.application_count|pluralize }}
         </div>
 
         <div class="job-actions">
@@ -38,6 +39,7 @@
       </li>
     {% endfor %}
   </ul>
+  {% include "jobs/pagination.html" %}
 {% else %}
   <p>You haven’t posted any jobs yet.</p>
 {% endif %}

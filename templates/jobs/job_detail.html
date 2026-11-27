@@ -3,7 +3,7 @@
 <div class="card">
   <h2>{{ job.title }}</h2>
   <p class="job-meta">
-    {{ job.company_name|default:job.employer.company|default:job.employer.username }}
+    {{ job.display_company }}
     &bull; {{ job.location|default:"Anywhere" }} &bull; {{ job.get_job_type_display }}
   </p>
 
@@ -40,12 +40,13 @@
       <a href="{% url 'jobs:job_applicants' job.pk %}" class="btn btn-primary">View Applicants</a>
     {% endif %}
 
-    {% if user.is_authenticated and user.role == "applicant" and job.is_active %}
+    {% if user.is_authenticated and user.role == "applicant" and not user.is_superuser and job.is_active %}
       <a href="{% url 'jobs:apply' job.pk %}" class="btn btn-primary">Apply Now</a>
     {% endif %}
 
     {% if not user.is_authenticated and job.is_active %}
-      <a href="{% url 'signup' %}?next={% url 'jobs:apply' job.pk %}" class="btn btn-primary">
+      {% url 'jobs:apply' job.pk as apply_url %}
+      <a href="{% url 'signup' %}?next={{ apply_url|urlencode:'' }}" class="btn btn-primary">
         Apply Now (Create an account)
       </a>
     {% endif %}

@@ -1,24 +1,25 @@
-# jobs/emails.py
+import logging
+
 from django.core.mail import send_mail
 from django.conf import settings
 
+logger = logging.getLogger(__name__)
+
+
 def _safe_send_mail(subject: str, message: str, recipient_list: list[str]) -> None:
-    """
-    Wrapper around send_mail that skips empty emails and fails silently.
-    """
-    recipient_list = [e for e in recipient_list if e]
+    recipient_list = [email for email in recipient_list if email]
     if not recipient_list:
         return
 
-    from_email = getattr(settings, "DEFAULT_FROM_EMAIL", "no-reply@jobportal.local")
-
-    send_mail(
-        subject=subject,
-        message=message,
-        from_email=from_email,
-        recipient_list=recipient_list,
-        fail_silently=False,  # in dev we don't want crashes on email issues
-    )
+    try:
+        send_mail(
+            subject=subject,
+            message=message,
+            from_email=settings.DEFAULT_FROM_EMAIL,
+            recipient_list=recipient_list,
+        )
+    except (OSError, ValueError):
+        logger.exception("Could not send an application notification")
 
 
 def send_application_submitted_email(application) -> None:
@@ -45,7 +46,7 @@ def send_application_submitted_email(application) -> None:
     subject_applicant = f"Application received for '{job.title}'"
     message_applicant = (
         f"Hello {applicant.username},\n\n"
-        f"We have received your application for the job '{job.title}' at {getattr(job, 'company_name', 'the employer')}.\n"
+        f"We have received your application for the job '{job.title}' at {job.display_company}.\n"
         f"Current status: {application.get_status_display()}.\n\n"
         f"You can log in to your dashboard at any time to track the progress of your application.\n\n"
         f"- Job Portal"

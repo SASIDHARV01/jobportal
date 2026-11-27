@@ -12,7 +12,7 @@ class JobForm(forms.ModelForm):
             "salary_min", "salary_max", "skills", "is_open", "deadline"
         ]
         widgets = {
-            "deadline": forms.DateInput(attrs={"type": "date"}),
+            "deadline": forms.DateInput(format="%Y-%m-%d", attrs={"type": "date"}),
             "description": forms.Textarea(attrs={"rows": 6}),
         }
 
@@ -26,10 +26,8 @@ class JobForm(forms.ModelForm):
             if salary_min > salary_max:
                 self.add_error("salary_max", "Max salary must be greater than or equal to min salary.")
 
-        if deadline is None:
-            self.add_error("deadline", "Deadline is required.")
-        else:
-            if deadline < timezone.now().date():
+        if deadline is not None and deadline < timezone.now().date():
+            if not self.instance.pk or deadline != self.instance.deadline:
                 self.add_error("deadline", "Deadline must be today or a future date.")
 
         # Normalize skills

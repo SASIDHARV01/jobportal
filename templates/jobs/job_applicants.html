@@ -2,7 +2,7 @@
 {% block content %}
 <h2>Applicants for {{ job.title }}</h2>
 <p class="job-meta">
-  {{ job.company_name|default:job.employer.company|default:job.employer.username }}
+  {{ job.display_company }}
   &bull; {{ job.location|default:"Anywhere" }}
 </p>
 
@@ -16,6 +16,7 @@
           <th>Status</th>
           <th>Applied At</th>
           <th>Resume</th>
+          <th>Cover Letter</th>
           <th>Update</th>
         </tr>
       </thead>
@@ -30,6 +31,16 @@
             <td>{{ app.applied_at }}</td>
             <td>
               <a href="{% url 'jobs:download_resume' app.pk %}">Download</a>
+            </td>
+            <td>
+              {% if app.cover_letter %}
+                <details>
+                  <summary>Read cover letter</summary>
+                  <p class="cover-letter">{{ app.cover_letter }}</p>
+                </details>
+              {% else %}
+                &mdash;
+              {% endif %}
             </td>
             <td>
               <a href="{% url 'jobs:update_application_status' app.pk %}">Change Status</a>

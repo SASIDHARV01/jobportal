@@ -1,0 +1,11 @@
+{% if jobs.paginator.num_pages > 1 %}
+  <nav class="pagination" aria-label="Job pages">
+    {% if jobs.has_previous %}
+      <a href="{% querystring page=jobs.previous_page_number %}">Previous</a>
+    {% endif %}
+    <span>Page {{ jobs.number }} of {{ jobs.paginator.num_pages }}</span>
+    {% if jobs.has_next %}
+      <a href="{% querystring page=jobs.next_page_number %}">Next</a>
+    {% endif %}
+  </nav>
+{% endif %}
