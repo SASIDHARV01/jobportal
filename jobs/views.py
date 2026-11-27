@@ -1,10 +1,9 @@
 from django.core.paginator import Paginator
-from django.db.models import Q
+from django.db.models import Count, Q
 from django.shortcuts import get_object_or_404, redirect, render
-from django.http import FileResponse, HttpResponseForbidden, Http404
+from django.http import FileResponse, Http404, HttpResponseForbidden
+from django.views.decorators.cache import never_cache
 from django.contrib import messages
-from django.contrib.auth.decorators import login_required
-from django.utils import timezone
 from .emails import (
     send_application_submitted_email,
     send_application_status_changed_email,
@@ -12,12 +11,11 @@ from .emails import (
 
 from accounts.decorators import role_required
 from .models import Job, Application
-from .forms import JobForm
-from .forms import ApplicationForm, ApplicationStatusForm
+from .forms import ApplicationForm, ApplicationStatusForm, JobForm
 
 
 def job_list(request):
-    qs = Job.objects.open()
+    qs = Job.objects.open().select_related("employer").order_by("-created_at", "-pk")
     q = request.GET.get("q", "").strip()
     location = request.GET.get("location", "").strip()
     job_type = request.GET.get("job_type", "").strip()
@@ -43,17 +41,24 @@ def job_list(request):
 
 def job_detail(request, pk):
     job = get_object_or_404(Job, pk=pk)
-    # hide fully closed/expired job unless employer owner or admin
+    user = request.user
     if not job.is_active:
-        if not request.user.is_authenticated or (not request.user.is_superuser and request.user != job.employer):
+        can_view = user.is_authenticated and not user.is_disabled and (
+            user.is_superuser or user.pk == job.employer_id
+            or job.applications.filter(applicant=user).exists()
+        )
+        if not can_view:
             return HttpResponseForbidden("This job is closed or expired.")
     return render(request, "jobs/job_detail.html", {"job": job})
 
 
-
 @role_required("employer")
 def employer_jobs(request):
-    qs = Job.objects.filter(employer=request.user)
+    qs = (
+        Job.objects.filter(employer=request.user)
+        .annotate(application_count=Count("applications"))
+        .order_by("-created_at", "-pk")
+    )
     paginator = Paginator(qs, 10)
     page = request.GET.get("page")
     jobs = paginator.get_page(page)
@@ -107,10 +112,7 @@ def apply_to_job(request, pk):
             app.applicant = request.user
             app.save()
 
-            try:
-                send_application_submitted_email(app)
-            except Exception as e:
-                print("Email failed:", e)
+            send_application_submitted_email(app)
 
             messages.success(request, "Application submitted successfully.")
             return redirect("jobs:my_applications")
@@ -134,35 +136,43 @@ def job_applicants(request, pk):
     return render(request, "jobs/job_applicants.html", {"job": job, "applications": apps})
 
 
-@login_required
+@never_cache
+@role_required("applicant", "employer", "admin")
 def download_resume(request, app_id):
-    app = get_object_or_404(Application, pk=app_id)
-
-    
-    if request.user.is_superuser or app.applicant == request.user or app.job.employer == request.user:
-        if not app.resume:
-            raise Http404("Resume not found.")
-        return FileResponse(app.resume.open("rb"), as_attachment=True, filename=f"{app.applicant.username}_resume.pdf")
-    return HttpResponseForbidden("You are not allowed to download this resume.")
+    app = get_object_or_404(Application.objects.select_related("job", "applicant"), pk=app_id)
+    user = request.user
+    can_review = user.is_staff and (
+        user.has_perm("jobs.view_application") or user.has_perm("jobs.change_application")
+    )
+    if not (can_review or user.pk in (app.applicant_id, app.job.employer_id)):
+        return HttpResponseForbidden("You are not allowed to download this resume.")
+    if not app.resume:
+        raise Http404("Resume not found.")
+    try:
+        resume = app.resume.open("rb")
+    except FileNotFoundError as exc:
+        raise Http404("Resume not found.") from exc
+    return FileResponse(
+        resume, as_attachment=True, filename=f"{app.applicant.username}_resume.pdf"
+    )
 
 
 @role_required("employer")
 def update_application_status(request, app_id):
-    app = get_object_or_404(Application, pk=app_id)
+    app = get_object_or_404(Application.objects.select_related("job", "applicant"), pk=app_id)
 
-   
     if app.job.employer != request.user and not request.user.is_superuser:
         return HttpResponseForbidden("You cannot update this application.")
 
     if request.method == "POST":
         form = ApplicationStatusForm(request.POST, instance=app)
         if form.is_valid():
-            form.save()
-            try:
+            if form.has_changed():
+                form.save()
                 send_application_status_changed_email(app)
-            except Exception as e:
-                print("Email failed:", e)
-            messages.success(request, "Application status updated.")
+                messages.success(request, "Application status updated.")
+            else:
+                messages.info(request, "Application status is unchanged.")
             return redirect("jobs:job_applicants", pk=app.job.pk)
     else:
         form = ApplicationStatusForm(instance=app)

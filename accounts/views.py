@@ -1,94 +1,88 @@
-from django.contrib import messages
-from django.shortcuts import render, redirect
-from django.contrib.auth import authenticate, login, logout
-from django.contrib.auth.decorators import login_required
-from django.core.mail import send_mail
+import logging
+
 from django.conf import settings
-from .models import User
+from django.contrib import messages
+from django.contrib.auth import authenticate, login, logout
+from django.core.mail import send_mail
+from django.shortcuts import redirect, render
+from django.urls import reverse
+from django.utils.http import url_has_allowed_host_and_scheme
+from django.views.decorators.http import require_POST
 
 from .forms import LoginForm, SignupForm
 
+logger = logging.getLogger(__name__)
+
+
+def auth_destination(request):
+    destination = request.POST.get("next") or request.GET.get("next", "")
+    if destination.startswith("/") and url_has_allowed_host_and_scheme(
+        destination, allowed_hosts={request.get_host()}, require_https=request.is_secure()
+    ):
+        return destination
+    return ""
+
+
 def login_view(request):
-    login_form = LoginForm(request.POST or None)
-    signup_form = SignupForm()
+    destination = auth_destination(request)
+    form = LoginForm(request.POST if request.method == "POST" else None)
 
-    if request.method == "POST" and login_form.is_valid():
-        username = login_form.cleaned_data["username"]
-        password = login_form.cleaned_data["password"]
-        role = login_form.cleaned_data["role"]
-
+    if request.method == "POST" and form.is_valid():
+        username = form.cleaned_data["username"]
+        password = form.cleaned_data["password"]
+        role = form.cleaned_data["role"]
         user = authenticate(request, username=username, password=password)
+
         if user is None:
-            login_form.add_error(None, "Invalid username or password.")
+            form.add_error(None, "Invalid username or password.")
+        elif user.is_staff and (user.is_superuser or user.role == "admin"):
+            login(request, user)
+            return redirect("admin:index")
+        elif user.role != role:
+            form.add_error("role", "Incorrect role selected for this account.")
         else:
-            # Admins: ignore dropdown and route straight to Django admin
-            if getattr(user, "is_superuser", False) or getattr(user, "role", "") == "admin":
-                login(request, user)
-                return redirect("/admin/")
+            login(request, user)
+            dashboard = "employer_dashboard" if role == "employer" else "applicant_dashboard"
+            return redirect(destination or reverse(dashboard))
 
-            # Non-admins: selected role must match stored role
-            if getattr(user, "role", "") != role:
-                login_form.add_error("role", "Incorrect role selected for this account.")
-            else:
-                login(request, user)
-                if role == "employer":
-                    return redirect("/dashboard/employer/")
-                else:
-                    return redirect("/dashboard/applicant/")
+    return render(request, "accounts/auth.html", {
+        "form": form,
+        "mode": "login",
+        "next": destination,
+    })
 
-    return render(
-        request,
-        "accounts/auth.html",
-        {
-            "login_form": login_form,
-            "signup_form": signup_form,
-            "mode": "login",
-        },
-    )
 
 def signup_view(request):
-    login_form = LoginForm()
-    signup_form = SignupForm(request.POST or None)
+    destination = auth_destination(request)
+    form = SignupForm(request.POST if request.method == "POST" else None)
 
-    if request.method == "POST" and signup_form.is_valid():
-        user = signup_form.save()
-        if user.email:
-            subject = "Welcome to Job Portal"
-            role = getattr(user, "role", "user")
-            message = (
-                f"Hi {user.username},\n\n"
-                f"Your account on Job Portal has been created successfully as a '{role}'.\n\n"
-                f"You can now log in and start using the platform:\n"
-                f"- Applicants: browse jobs and apply.\n"
-                f"- Employers: post jobs and manage applications.\n\n"
-                f"Thanks,\nJob Portal Team"
+    if request.method == "POST" and form.is_valid():
+        user = form.save()
+        try:
+            send_mail(
+                subject="Welcome to Job Portal",
+                message=(
+                    f"Hi {user.username},\n\n"
+                    f"Your {user.get_role_display()} account is ready. "
+                    "Sign in to get started.\n\nJob Portal Team"
+                ),
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=[user.email],
             )
-
-            try:
-                send_mail(
-                    subject=subject,
-                    message=message,
-                    from_email=settings.DEFAULT_FROM_EMAIL,
-                    recipient_list=[user.email],
-                    fail_silently=True,
-                )
-            except Exception as e:
-                # In a real project you would log this; for now we avoid breaking signup
-                print("Error sending welcome email:", e)
+        except (OSError, ValueError):
+            logger.exception("Could not send welcome email for user %s", user.pk)
 
         messages.success(request, "Account created. Please log in.")
-        return redirect("login")
+        return redirect(reverse("login", query={"next": destination} if destination else None))
 
-    return render(
-        request,
-        "accounts/auth.html",
-        {
-            "login_form": login_form,
-            "signup_form": signup_form,
-            "mode": "signup",
-        },
-    )
+    return render(request, "accounts/auth.html", {
+        "form": form,
+        "mode": "signup",
+        "next": destination,
+    })
 
+
+@require_POST
 def logout_view(request):
     logout(request)
     messages.success(request, "You have been logged out.")

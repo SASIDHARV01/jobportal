@@ -10,29 +10,38 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
-from pathlib import Path
 import os
+from pathlib import Path
 from dotenv import load_dotenv
+from django.core.exceptions import ImproperlyConfigured
+from django.core.management.utils import get_random_secret_key
 
-load_dotenv()
-ALLOW_ADMIN_SIGNUP = os.getenv("ALLOW_ADMIN_SIGNUP", "1") == "1"  # enable in dev; set to 0 in prod
-ADMIN_INVITE_CODE = os.getenv("ADMIN_INVITE_CODE", "LETMEIN")     # change this in your .env
-
-# Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
+load_dotenv(BASE_DIR / ".env")
 
+DEBUG = os.getenv("DEBUG", "1") == "1"
+SECRET_KEY = os.getenv("SECRET_KEY")
+if not SECRET_KEY:
+    if not DEBUG:
+        raise ImproperlyConfigured("Set SECRET_KEY when DEBUG=0.")
+    SECRET_KEY = get_random_secret_key()
 
-# Quick-start development settings - unsuitable for production
-# See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
+ALLOWED_HOSTS = [
+    host.strip() for host in os.getenv("ALLOWED_HOSTS", "localhost,127.0.0.1,[::1]").split(",")
+    if host.strip()
+]
+CSRF_TRUSTED_ORIGINS = [
+    origin.strip() for origin in os.getenv("CSRF_TRUSTED_ORIGINS", "").split(",")
+    if origin.strip()
+]
+SECURE_SSL_REDIRECT = not DEBUG
+SESSION_COOKIE_SECURE = not DEBUG
+CSRF_COOKIE_SECURE = not DEBUG
+SECURE_HSTS_SECONDS = int(os.getenv("SECURE_HSTS_SECONDS", "0"))
+if os.getenv("TRUST_PROXY_HTTPS", "0") == "1":
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
-# SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-m4x9g&jpp5oqi)_-i6rtq!n9p%v%=7uu_t!_-yzv6#_7q!vh#@'
-
-# SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = False
-
-ALLOWED_HOSTS = ["*"]
-
+LOGIN_URL = "login"
 
 # Application definition
 
@@ -88,7 +97,39 @@ DATABASES = {
         "NAME": BASE_DIR / "db.sqlite3",
     }
 }
+database_url = os.getenv("DATABASE_URL", "").strip()
+if database_url:
+    from psycopg import ProgrammingError
+    from psycopg.conninfo import conninfo_to_dict
+
+    if not database_url.startswith(("postgres://", "postgresql://")):
+        raise ImproperlyConfigured("DATABASE_URL must be a PostgreSQL connection URL.")
+    try:
+        connection_options = conninfo_to_dict(database_url)
+    except ProgrammingError:
+        raise ImproperlyConfigured("DATABASE_URL is invalid. Check the Supabase connection URL.") from None
+
+    if not all(connection_options.get(key) for key in ("dbname", "host", "user")):
+        raise ImproperlyConfigured("DATABASE_URL must specify a database, host, and user.")
+
+    connection_options.setdefault("sslmode", "require")
+    connection_options.setdefault("connect_timeout", "10")
+    DATABASES["default"] = {
+        "ENGINE": "django.db.backends.postgresql",
+        "NAME": connection_options.pop("dbname"),
+        "HOST": connection_options.pop("host"),
+        "PORT": connection_options.pop("port", "5432"),
+        "USER": connection_options.pop("user"),
+        "PASSWORD": connection_options.pop("password", ""),
+        "OPTIONS": connection_options,
+        "CONN_MAX_AGE": 60,
+        "CONN_HEALTH_CHECKS": True,
+    }
+
 AUTH_USER_MODEL = "accounts.User"
+AUTHENTICATION_BACKENDS = [
+    "accounts.backends.PortalBackend",
+]
 
 
 # Password validation
@@ -128,7 +169,10 @@ USE_TZ = True
 STATIC_URL = 'static/'
 STATIC_ROOT = BASE_DIR / "staticfiles"
 STATICFILES_DIRS = [BASE_DIR / "static"]
-STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
+STORAGES = {
+    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+    "staticfiles": {"BACKEND": "whitenoise.storage.CompressedStaticFilesStorage"},
+}
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
@@ -138,7 +182,12 @@ MEDIA_ROOT = BASE_DIR / "media"
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
-EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
+EMAIL_BACKEND = os.getenv(
+    "EMAIL_BACKEND",
+    "django.core.mail.backends.console.EmailBackend" if DEBUG
+    else "django.core.mail.backends.smtp.EmailBackend",
+)
+EMAIL_TIMEOUT = int(os.getenv("EMAIL_TIMEOUT", "10"))
 EMAIL_HOST = os.getenv("EMAIL_HOST", "smtp.gmail.com")
 EMAIL_PORT = int(os.getenv("EMAIL_PORT", "587"))
 EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER")

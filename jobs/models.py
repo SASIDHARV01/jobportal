@@ -55,6 +55,10 @@ class Job(models.Model):
     def is_active(self):
         return self.is_open and self.deadline >= timezone.now().date()
 
+    @property
+    def display_company(self):
+        return self.company_name or self.employer.company or self.employer.username
+
     def skills_list(self):
         return [s.strip().lower() for s in self.skills.split(",") if s.strip()]
 
@@ -89,11 +93,3 @@ class Application(models.Model):
 
     def __str__(self):
         return f"{self.applicant.username} → {self.job.title} ({self.status})"
-    
-    @property
-    def display_company(self):
-        return (
-            self.company_name
-            or getattr(self.employer, "company", "") 
-            or self.employer.username
-        )

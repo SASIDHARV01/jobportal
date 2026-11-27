@@ -1,91 +1,73 @@
-**Online Job Recruitment & Application Portal**
-A full-stack web application built for Flipkart Internship Task — with Role-Based Access, Email Notifications, and Job Workflow Management.
+# Job Portal
 
-**Overview**
-This project simulates a real-world job recruitment system where Applicants apply for jobs, Employers post and manage job listings, and Admins oversee the entire platform.
-The system is built using:
-Frontend : HTML, CSS, JavaScript
-Backend : Django (Python)
-Database : MySQL
-Authentication : Django Auth + Custom Role-Based Access
-Emails : SMTP (Gmail)
+A Django recruitment portal built for a Flipkart internship task. Employers publish listings and review applications. Applicants find jobs, submit PDF resumes, and track their progress. Administrators manage users, jobs, and applications in Django Admin.
 
-**Features**
-Admin - Can log into admin dashboard, manage all users/jobs/applications
-Employer - Post jobs, edit jobs, view applicants, update status, send notifications
-Applicant - Browse jobs, apply with resume (PDF), track applications
+## Hiring workflow
 
-**Functional Modules**
+1. An employer creates a listing with a deadline, skills, and an optional salary range.
+2. Applicants filter open listings by keyword, location, job type, or skills.
+3. An applicant selects **Apply Now**, signs in or registers, and returns to the application form.
+4. The applicant uploads one PDF resume up to 5 MB and can add a cover letter.
+5. The employer reviews submissions, downloads resumes, and updates application statuses.
+6. The applicant sees the updated status in **My Applications**. Email delivery depends on SMTP configuration.
 
-	•	 Single authentication page with Login / Register toggle
-	•	 Role-based signup (dynamic fields per role)
-	•	 Job posting with title, salary range, skills, deadlines, company name
-	•	 Job search + filters (by keyword, salary, category, experience)
-	•	 Resume upload validation (PDF only, max 5MB, MIME & Binary validation)
-	•	 Real email notifications for:
-	•	Signup confirmation
-	•	Job applied
-	•	Application status updated (Selected / Rejected / Under Review)
-	•	 Employer dashboard: Job performance + application count
-	•	 Applicant dashboard: Track application status
+The employer dashboard shows counts for listings and applications. Resume downloads require permission. Public registration is available for applicants and employers.
 
-**Installation & Setup Guide**
+## Run locally
 
-1) Clone the Repository 
-    git clone https://github.com/GVSASIDHAR/JOB_PORTAL.git
-    cd JOB_PORTAL
-2)  Create Virtual Environment
-    python3 -m venv jpvenv
-    source jpvenv/bin/activate
-3)  Install Dependencies
-    pip install -r requirements.txt
-4)  Configure Environment Variables
-    DB_NAME=job_portal
-    DB_USER=jobuser
-    DB_PASSWORD=jobpass
-    DB_HOST=127.0.0.1
-    DB_PORT=3306
-    
-    EMAIL_HOST=smtp.gmail.com
-    EMAIL_PORT=587
-    EMAIL_USE_TLS=1
-    EMAIL_HOST_USER=yourgmail@gmail.com
-    EMAIL_HOST_PASSWORD=your-app-password
-    DEFAULT_FROM_EMAIL=yourgmail@gmail.com
-5)  Setup MySQL Database
-    CREATE DATABASE job_portal CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-    CREATE USER 'jobuser'@'localhost' IDENTIFIED BY 'jobpass';
-    GRANT ALL PRIVILEGES ON job_portal.* TO 'jobuser'@'localhost';
-    FLUSH PRIVILEGES;
-6)  Apply Migrations
-    python manage.py migrate
-7)  Create Superuser
-    python manage.py createsuperuser
-8)  Run The Project
-    python manage.py runserver
+Use Python 3.11 or newer. Local development defaults to SQLite when `DATABASE_URL` is unset. From the repository root:
 
-**Project Structure**
-jobportal/
-│
-├── accounts/        → Authentication, signup, login, roles
-├── core/            → Dashboards & homepage
-├── jobs/            → Job posting, applications, workflow
-│
-├── templates/       → All HTML templates
-├── static/css/      → UI styling (main.css)
-│
-└── .env             
+```sh
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+python manage.py migrate
+python manage.py createsuperuser
+python manage.py runserver
+```
 
-**Testing Workflow (Expected User Journey)**
+Open [Job Portal](http://127.0.0.1:8000/) or [Django Admin](http://127.0.0.1:8000/admin/). Run tests with `python manage.py test`. By default, local email messages appear in the terminal. An optional `.env` can override settings for local use.
 
-Visit Home                    -   Shows job list
-Click Apply (not logged in)   -   Redirects to signup
-Signup as Applicant           -   Email sent → role dashboard
-Signup as Employer            -   Can post jobs
-Applicant applies             -   Employer receives notification
-Employer updates status       -   Applicant receives email update
+## Supabase PostgreSQL
 
-**Screenshots**
+Use a dedicated Supabase project for Job Portal. Since Django connects directly to PostgreSQL, disable the project's Data API before importing user data. In Supabase, open **Connect** and copy the **Session pooler** URL (port `5432`). It supports IPv4 and suits the Gunicorn deployment. Replace the password placeholder with the URL-encoded database password. Save the connection URL as `DATABASE_URL` in your ignored local `.env` or in the host's secret environment settings. The Django connection requires TLS by default. You can supply `sslmode=verify-full` and `sslrootcert` in the URL if the host has the Supabase CA certificate.
+
+For a fresh database, run `python manage.py migrate` followed by `python manage.py createsuperuser`.
+
+### Move the existing SQLite records
+
+Use a fresh Supabase database for the import. Pause writes to the source during the final copy, and keep an independent backup of SQLite and any uploaded files. Run the following from the environment that has the **source** SQLite file. Keep the generated fixture private because it contains account records and password hashes.
+
+```sh
+umask 077
+migration_dir=$(mktemp -d)
+DATABASE_URL= python manage.py dumpdata --all --natural-foreign \
+    --exclude contenttypes --exclude auth.permission --exclude sessions \
+    --output "$migration_dir/jobportal.json"
+python manage.py migrate
+python manage.py loaddata "$migration_dir/jobportal.json"
+```
+
+The empty `DATABASE_URL=` on the export command selects SQLite for that command alone. The remaining commands use the Supabase URL from your environment. Migrations recreate Django's content types and built-in permissions. Users sign in again after cutover.
+
+Before switching the hosted app, compare record counts and check an existing sign-in, job posting, application history, and resume download. Resume file paths move with their application rows. PDF files must be copied to private persistent file storage separately.
+
+## Hosting configuration
+
+Set `DEBUG=0`, a unique `SECRET_KEY`, and `ALLOWED_HOSTS` with the deployed hostnames. Set `CSRF_TRUSTED_ORIGINS` with the full HTTPS origins if needed. Set `TRUST_PROXY_HTTPS=1` only when the hosting proxy sets and controls the forwarded HTTPS header. Configure `SECURE_HSTS_SECONDS` after HTTPS is working. Set the email backend and SMTP credentials through the host's environment settings.
+
+Run `python manage.py check --deploy`, `python manage.py migrate`, and `python manage.py collectstatic --noinput` as part of deployment. The start command is `gunicorn jobportal.wsgi:application`. Set `DATABASE_URL` for Supabase PostgreSQL. Uploaded resumes still require private persistent file storage for `media/`. Serve downloads through the application's authorized download route.
+
+## Project structure
+
+| Directory | Responsibility |
+|---|---|
+| `accounts/` | User model, registration, authentication, and roles |
+| `jobs/` | Job listings, applications, resume access, and application notifications |
+| `core/` | Role dashboards and home routing |
+| `templates/` and `static/` | Django templates and CSS |
+
+## Screenshots from the original internship submission
 
 <img width="2940" height="1912" alt="image" src="https://github.com/user-attachments/assets/6b79c276-d317-49c7-af69-cf26cc2d62a0" />
 
@@ -97,11 +79,4 @@ Employer updates status       -   Applicant receives email update
 
 <img width="2940" height="1912" alt="image" src="https://github.com/user-attachments/assets/6afc2197-d149-4894-a11c-67eefdf01233" />
 
-
-
-
-**Developed By - Venkata Sasidhar Guturi**
-
-
-
-
+Developed by Venkata Sasidhar Guturi.
